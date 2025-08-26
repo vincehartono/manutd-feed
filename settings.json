@@ -1,1 +1,19 @@
-{"title":"Man Utd News","link":"https://manchesterunitednews.godaddysites.com/","description":"Curated Manchester United updates"}
+{
+  "title": "United Pulse",
+  "link": "https://manchesterunitednews.godaddysites.com/",
+  "description": "Live Manchester United updates (auto-aggregated).",
+  "mode": "rss_aggregate",
+  "rss_sources": [
+    "https://example.com/feed1.xml",
+    "https://example.com/feed2.xml"
+  ],
+  "keywords": [
+    "Manchester United",
+    "Man Utd",
+    "MUFC"
+  ],
+  "exclude_keywords": [],
+  "max_items": 30,
+  "days_lookback": 14,
+  "google_sheet_csv_url": "https://docs.google.com/spreadsheets/d/.../pub?output=csv"
+}
