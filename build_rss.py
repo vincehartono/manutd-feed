@@ -189,15 +189,8 @@ def write_summary_pages(items: List[Dict]) -> None:
         slug = slugify(it["title"] or it["guid"])
         it["slug"] = slug
 
-        # Build the GitHub summary page (still generated so you keep an archive)
+        # Build the GitHub summary page (no redirect)
         html = render_summary_html(it["title"], it["link"], it["desc"], it["pubDate"])
-
-        # If you want GH pages to auto-forward old links to GoDaddy, add a redirect:
-        if article_base:
-            godaddy_url = f"{article_base}?slug={slug}"
-            redirect = f'<meta http-equiv="refresh" content="0; url={godaddy_url}">'
-            html = html.replace("<title>", redirect + "<title>", 1)
-
         (posts_dir / f"{slug}.html").write_text(html, encoding="utf-8")
 
         # Tell the RSS to use your GoDaddy page if configured, else GitHub pages
@@ -207,6 +200,7 @@ def write_summary_pages(items: List[Dict]) -> None:
             it["summary_url"] = f"{SITE_BASE}/posts/{slug}.html"
         else:
             it["summary_url"] = it["link"]
+
 
 def write_index(items: List[Dict]) -> None:
     # simple landing page with links to summaries
