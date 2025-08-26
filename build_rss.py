@@ -195,7 +195,7 @@ def write_summary_pages(items: List[Dict]) -> None:
 
         # Tell the RSS to use your GoDaddy page if configured, else GitHub pages
         if article_base:
-            it["summary_url"] = f"{article_base}?slug={slug}"
+            it["summary_url"] = f"{article_base}#slug={slug}"
         elif SITE_BASE:
             it["summary_url"] = f"{SITE_BASE}/posts/{slug}.html"
         else:
