@@ -233,7 +233,7 @@ def build_rss(items: List[Dict]) -> str:
         parts.append("    <item>")
         parts.append("      <title>" + escape(it["title"]) + "</title>")
         parts.append("      <link>" + escape(link_for_rss) + "</link>")
-        parts.append('      <guid isPermaLink="false">' + escape(it["guid"] or it["link"]) + "</guid>")
+        parts.append('      <guid isPermaLink="true">' + escape(link_for_rss) + "</guid>")
         parts.append("      <pubDate>" + str(pub) + "</pubDate>")
         parts.append("      <description><![CDATA[" + desc_with_link + "]]></description>")
         parts.append("    </item>")
