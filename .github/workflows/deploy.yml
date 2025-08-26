@@ -1,5 +1,4 @@
 name: Deploy RSS to Pages
-
 on:
   push:
     branches: [ "main" ]
@@ -19,14 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-
       - name: Build RSS
         run: python build_rss.py
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -41,7 +37,6 @@ jobs:
     steps:
       - name: Configure Pages
         uses: actions/configure-pages@v5
-
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
