@@ -3,6 +3,8 @@
   "link": "https://manchesterunitednews.godaddysites.com/",
   "description": "Live Manchester United updates (auto-aggregated).",
   "mode": "rss_aggregate",
+  "site_base": "https://vincehartono.github.io/manutd-feed",
+
   "rss_sources": [
     "https://www.theguardian.com/football/manchester-united/rss",
     "https://strettynews.com/feed",
@@ -20,9 +22,7 @@
     "Old Trafford",
     "Red Devils"
   ],
-  "exclude_keywords": [
-    "United States"
-  ],
+  "exclude_keywords": ["United States"],
   "max_items": 40,
   "days_lookback": 14
 }
