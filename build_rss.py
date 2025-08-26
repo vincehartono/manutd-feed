@@ -165,20 +165,54 @@ def render_summary_html(title: str, original_url: str, desc: str, pub_dt: dateti
     pub_str = to_rfc822(pub_dt)
     return f"""<!doctype html>
 <html lang="en">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="canonical" href="{escape(original_url)}">
 <title>{escape(title)}</title>
 <style>{SUMMARY_CSS}</style>
+</head>
+<body>
 <main>
   <article class="card">
     <h1>{escape(title)}</h1>
     <div class="meta">Published: {escape(pub_str)}</div>
     <p>{desc}</p>
-    <p><a class="btn" href="{escape(original_url)}" rel="noopener nofollow">Read the original article →</a></p>
+    <p>
+      <a class="btn" data-read-original="1"
+         href="{escape(original_url)}"
+         target="_blank"
+         rel="noopener noreferrer nofollow">
+         Read the original article →
+      </a>
+    </p>
   </article>
   <footer>Curated by <a href="{escape(LINK)}">{escape(TITLE)}</a></footer>
 </main>
+
+<script>
+(function () {{
+  // Make the "Read original" button work even when this page is inside an iframe (GoDaddy)
+  var link = document.querySelector('a.btn[data-read-original]');
+  if (!link) return;
+
+  link.addEventListener('click', function (e) {{
+    try {{
+      if (window.top !== window.self) {{
+        // We are inside an iframe → navigate the top window instead
+        e.preventDefault();
+        window.top.location.href = this.href;
+      }}
+      // Otherwise let target=_blank open a new tab
+    }} catch (err) {{
+      // As a fallback, try opening a new tab explicitly
+      e.preventDefault();
+      window.open(this.href, '_blank', 'noopener');
+    }}
+  }});
+}})();
+</script>
+</body>
 </html>"""
 
 def write_summary_pages(items: List[Dict]) -> None:
