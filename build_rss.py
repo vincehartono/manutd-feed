@@ -192,24 +192,24 @@ def render_summary_html(title: str, original_url: str, desc: str, pub_dt: dateti
 
 <script>
 (function () {{
-  // Make the "Read original" button work even when this page is inside an iframe (GoDaddy)
-  var link = document.querySelector('a.btn[data-read-original]');
-  if (!link) return;
+  var original = {json.dumps(original_url)};
+  // Tell the parent (GoDaddy page) the original URL as soon as we load
+  try {{
+    window.parent.postMessage({{ kind: 'summary-ready', original: original }}, '*');
+  }} catch (e) {{}}
 
-  link.addEventListener('click', function (e) {{
-    try {{
-      if (window.top !== window.self) {{
-        // We are inside an iframe → navigate the top window instead
-        e.preventDefault();
-        window.top.location.href = this.href;
-      }}
-      // Otherwise let target=_blank open a new tab
-    }} catch (err) {{
-      // As a fallback, try opening a new tab explicitly
-      e.preventDefault();
-      window.open(this.href, '_blank', 'noopener');
-    }}
-  }});
+  // On button click, ask the parent to open the original at top level
+  var link = document.querySelector('a.btn[data-read-original]');
+  if (link) {{
+    link.addEventListener('click', function (e) {{
+      try {{
+        if (window.top !== window.self) {{
+          e.preventDefault();
+          window.parent.postMessage({{ kind: 'open-original', original: original }}, '*');
+        }}
+      }} catch (err) {{}}
+    }});
+  }}
 }})();
 </script>
 </body>
