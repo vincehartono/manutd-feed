@@ -4,6 +4,7 @@
   "description": "Live Manchester United updates (auto-aggregated).",
   "mode": "rss_aggregate",
   "site_base": "https://vincehartono.github.io/manutd-feed",
+  "article_page_base": "https://manchesterunitednews.godaddysites.com/article",
 
   "rss_sources": [
     "https://www.theguardian.com/football/manchester-united/rss",
