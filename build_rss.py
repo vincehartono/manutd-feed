@@ -26,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime, format_datetime
 from typing import Dict, List
 from xml.sax.saxutils import escape
+import requests
+from bs4 import BeautifulSoup
 
 # ---------- load settings ----------
 ROOT = pathlib.Path(__file__).parent
@@ -241,6 +243,44 @@ def build_rss(items: List[Dict]) -> str:
     parts.append("</rss>")
     return "\n".join(parts)
 
+def enrich_summary(original_url: str, desc: str) -> str:
+    """Fetch the article and build a longer summary (meta description + first paragraphs)."""
+    desc = (desc or "").strip()
+    # If we already have a reasonably long summary, keep it
+    if len(desc) >= 500:
+        return desc
+    try:
+        r = requests.get(original_url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # meta descriptions
+        best = ""
+        og = soup.find("meta", attrs={"property": "og:description"})
+        if og and og.get("content"):
+            best = og["content"].strip()
+        if not best:
+            md = soup.find("meta", attrs={"name": "description"})
+            if md and md.get("content"):
+                best = md["content"].strip()
+
+        # first few paragraphs inside <article> or <main>
+        container = soup.find("article") or soup.find("main") or soup
+        paras = []
+        for p in container.find_all("p", limit=6):
+            txt = p.get_text(" ", strip=True)
+            if len(txt) > 60:
+                paras.append(txt)
+            if sum(len(x) for x in paras) > 900:
+                break
+
+        # pick the longest between existing desc, meta, and paragraphs
+        cand = max([desc, best, " ".join(paras)], key=lambda s: len(s or ""))
+        cand = (cand[:1200] + "…") if len(cand) > 1200 else cand
+        return cand or desc
+    except Exception:
+        return desc
+
 # ---------- main ----------
 def main():
     if MODE == "google_sheet":
@@ -252,6 +292,8 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     # Create summary pages + index and swap RSS links to summary pages
+    for it in items:
+    it["desc"] = enrich_summary(it["link"], it["desc"])
     write_summary_pages(items)
     write_index(items)
 
