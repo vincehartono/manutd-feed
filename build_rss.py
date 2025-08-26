@@ -1,20 +1,50 @@
-import json, pathlib
+#!/usr/bin/env python3
+"""
+Builds an RSS feed at public/feed.xml and summary pages at public/posts/*.html.
+
+Config: settings.json
+{
+  "title": "United Pulse",
+  "link": "https://manchesterunitednews.godaddysites.com/",
+  "description": "Live Manchester United updates (auto-aggregated).",
+  "mode": "rss_aggregate",        // or "google_sheet"
+  "rss_sources": ["https://.../feed", "..."],
+  "google_sheet_csv_url": "https://docs.google.com/.../pub?output=csv",
+  "keywords": ["Manchester United", "Man Utd", "MUFC"],
+  "exclude_keywords": [],
+  "max_items": 40,
+  "days_lookback": 14,
+  "site_base": "https://<YOUR_USERNAME>.github.io/<REPO_NAME>"  // NO trailing slash
+}
+"""
+import csv
+import io
+import json
+import pathlib
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime, format_datetime
+from typing import Dict, List
 from xml.sax.saxutils import escape
 
+# ---------- load settings ----------
 ROOT = pathlib.Path(__file__).parent
 SETTINGS = json.loads((ROOT / "settings.json").read_text(encoding="utf-8"))
 
-TITLE = SETTINGS.get("title", "My Feed")
-LINK = SETTINGS.get("link", "")
-DESC = SETTINGS.get("description", "")
-MODE = SETTINGS.get("mode", "rss_aggregate")
+TITLE: str = SETTINGS.get("title", "My Feed")
+LINK: str = SETTINGS.get("link", "")
+DESC: str = SETTINGS.get("description", "")
+MODE: str = SETTINGS.get("mode", "rss_aggregate")
 KEYWORDS = [k.lower() for k in SETTINGS.get("keywords", [])]
 EXCLUDE = [k.lower() for k in SETTINGS.get("exclude_keywords", [])]
-MAX_ITEMS = int(SETTINGS.get("max_items", 30))
-DAYS_LOOKBACK = int(SETTINGS.get("days_lookback", 14))
+MAX_ITEMS: int = int(SETTINGS.get("max_items", 30))
+DAYS_LOOKBACK: int = int(SETTINGS.get("days_lookback", 14))
+SITE_BASE: str = SETTINGS.get("site_base", "").rstrip("/")
 
+RSS_SOURCES: List[str] = SETTINGS.get("rss_sources", [])
+GOOGLE_SHEET_CSV_URL: str = SETTINGS.get("google_sheet_csv_url", "")
+
+# ---------- helpers ----------
 def to_rfc822(dt: datetime) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -37,11 +67,30 @@ def matches(text: str) -> bool:
         return False
     return True
 
-def fetch_rss():
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+def slugify(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = _SLUG_RE.sub("-", s).strip("-")
+    return s[:80] or "post"
+
+def dedupe_and_sort(items: List[Dict]) -> List[Dict]:
+    # newest first, dedupe by guid (or link)
+    seen = set()
+    out = []
+    for it in sorted(items, key=lambda x: x["pubDate"], reverse=True):
+        key = it.get("guid") or it.get("link")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(it)
+    return out[:MAX_ITEMS]
+
+# ---------- fetchers ----------
+def fetch_rss() -> List[Dict]:
     import feedparser
-    items = []
     cutoff = datetime.now(timezone.utc) - timedelta(days=DAYS_LOOKBACK)
-    for url in SETTINGS.get("rss_sources", []):
+    items: List[Dict] = []
+    for url in RSS_SOURCES:
         url = (url or "").strip()
         if not url:
             continue
@@ -57,77 +106,158 @@ def fetch_rss():
                 continue
             if not matches(f"{title}\n{desc}"):
                 continue
-            items.append({"title": title, "link": link, "guid": guid, "pubDate": dt, "desc": desc})
-    # dedupe by guid/link, newest first
-    seen = set()
-    deduped = []
-    for it in sorted(items, key=lambda x: x["pubDate"], reverse=True):
-        key = it["guid"] or it["link"]
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(it)
-    return deduped[:MAX_ITEMS]
+            items.append({
+                "title": title,
+                "link": link,              # original link
+                "guid": guid,              # keep guid as original for stable dedupe
+                "pubDate": dt,
+                "desc": desc
+            })
+    return dedupe_and_sort(items)
 
-def fetch_google_sheet():
-    import csv, io, requests
-    url = (SETTINGS.get("google_sheet_csv_url") or "").strip()
-    if not url:
+def fetch_google_sheet() -> List[Dict]:
+    import requests
+    if not GOOGLE_SHEET_CSV_URL:
         return []
-    r = requests.get(url, timeout=30)
+    r = requests.get(GOOGLE_SHEET_CSV_URL, timeout=30)
     r.raise_for_status()
-    items = []
     reader = csv.DictReader(io.StringIO(r.text))
+    items: List[Dict] = []
     for row in reader:
         title = (row.get("title") or "").strip()
         link = (row.get("url") or "").strip()
         desc = (row.get("summary") or "").strip()
-        pub  = (row.get("pubDate") or "").strip()
+        pub = (row.get("pubDate") or "").strip()
         guid = (row.get("guid") or "").strip() or link
         if not title or not link:
             continue
         dt = norm_pubdate(pub) if pub else datetime.now(timezone.utc)
         if not matches(f"{title}\n{desc}"):
             continue
-        items.append({"title": title, "link": link, "guid": guid, "pubDate": dt, "desc": desc})
-    items.sort(key=lambda x: x["pubDate"], reverse=True)
-    return items[:MAX_ITEMS]
+        items.append({
+            "title": title,
+            "link": link,              # original link you provided
+            "guid": guid,
+            "pubDate": dt,
+            "desc": desc
+        })
+    return dedupe_and_sort(items)
 
-def build_rss(items):
-    now_rfc = to_rfc822(datetime.now(timezone.utc))
-    out = []
-    out.append('<?xml version="1.0" encoding="UTF-8"?>')
-    out.append('<rss version="2.0">')
-    out.append('  <channel>')
-    out.append('    <title>' + escape(TITLE) + '</title>')
-    out.append('    <link>' + escape(LINK) + '</link>')
-    out.append('    <description>' + escape(DESC) + '</description>')
-    out.append('    <lastBuildDate>' + now_rfc + '</lastBuildDate>')
+# ---------- summary pages ----------
+SUMMARY_CSS = """
+:root{--fg:#111;--muted:#666;--bg:#fff;--acc:#cc0000}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+main{max-width:820px;margin:3rem auto;padding:0 1rem}
+h1{font-size:1.9rem;margin:0 0 0.5rem}
+p{margin:1rem 0}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
+.card{border:1px solid #eee;border-radius:14px;padding:1rem 1.2rem;margin:1rem 0;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.meta{color:var(--muted);font-size:.95rem}
+.btn{display:inline-block;margin-top:1rem;border:1px solid var(--acc);padding:.5rem .9rem;border-radius:10px}
+footer{margin:3rem 0 1rem;color:var(--muted);font-size:.9rem}
+"""
+
+def render_summary_html(title: str, original_url: str, desc: str, pub_dt: datetime) -> str:
+    pub_str = to_rfc822(pub_dt)
+    return f"""<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="canonical" href="{escape(original_url)}">
+<title>{escape(title)}</title>
+<style>{SUMMARY_CSS}</style>
+<main>
+  <article class="card">
+    <h1>{escape(title)}</h1>
+    <div class="meta">Published: {escape(pub_str)}</div>
+    <p>{desc}</p>
+    <p><a class="btn" href="{escape(original_url)}" rel="noopener nofollow">Read the original article →</a></p>
+  </article>
+  <footer>Curated by <a href="{escape(LINK)}">{escape(TITLE)}</a></footer>
+</main>
+</html>"""
+
+def write_summary_pages(items: List[Dict]) -> None:
+    if not SITE_BASE:
+        # We still generate pages; link building below will fallback to original link if site_base missing.
+        pass
+    posts_dir = ROOT / "public" / "posts"
+    posts_dir.mkdir(parents=True, exist_ok=True)
     for it in items:
+        slug = slugify(it["title"] or it["guid"])
+        html = render_summary_html(it["title"], it["link"], it["desc"], it["pubDate"])
+        (posts_dir / f"{slug}.html").write_text(html, encoding="utf-8")
+        # attach summary URL for RSS
+        if SITE_BASE:
+            it["summary_url"] = f"{SITE_BASE}/posts/{slug}.html"
+        else:
+            it["summary_url"] = it["link"]  # fallback if site_base not set
+
+def write_index(items: List[Dict]) -> None:
+    # simple landing page with links to summaries
+    lines = [
+        "<!doctype html><meta charset='utf-8'><title>{}</title>".format(escape(TITLE)),
+        "<style>body{font:16px/1.6 system-ui;margin:2rem} a{color:#cc0000;text-decoration:none} a:hover{text-decoration:underline}</style>",
+        f"<h1>{escape(TITLE)}</h1>",
+        f"<p>{escape(DESC)}</p>",
+        "<ul>"
+    ]
+    for it in items:
+        link = it.get("summary_url") or it.get("link")
+        lines.append(f"<li><a href='{escape(link)}'>{escape(it['title'])}</a></li>")
+    lines.append("</ul>")
+    (ROOT / "public" / "index.html").write_text("\n".join(lines), encoding="utf-8")
+
+# ---------- RSS output ----------
+def build_rss(items: List[Dict]) -> str:
+    now_rfc = to_rfc822(datetime.now(timezone.utc))
+    parts = []
+    parts.append('<?xml version="1.0" encoding="UTF-8"?>')
+    parts.append('<rss version="2.0">')
+    parts.append('  <channel>')
+    parts.append('    <title>' + escape(TITLE) + '</title>')
+    parts.append('    <link>' + escape(LINK) + '</link>')
+    parts.append('    <description>' + escape(DESC) + '</description>')
+    parts.append('    <lastBuildDate>' + now_rfc + '</lastBuildDate>')
+    for it in items:
+        # Link to the summary page (preferred), keep guid as original for stable dedupe
+        link_for_rss = it.get("summary_url") or it["link"]
         pub = it["pubDate"]
         if isinstance(pub, datetime):
             pub = to_rfc822(pub)
-        out.append("    <item>")
-        out.append("      <title>" + escape(it["title"]) + "</title>")
-        out.append("      <link>" + escape(it["link"]) + "</link>")
-        out.append("      <guid isPermaLink=\"false\">" + escape(it["guid"]) + "</guid>")
-        out.append("      <pubDate>" + str(pub) + "</pubDate>")
-        out.append("      <description><![CDATA[" + it["desc"] + "]]></description>")
-        out.append("    </item>")
-    out.append("  </channel>")
-    out.append("</rss>")
-    return "\n".join(out)
+        # include original link inside description
+        desc_with_link = f"""{it['desc']}<br/><br/>
+<a href="{escape(it['link'])}" rel="noopener nofollow">Read original →</a>"""
+        parts.append("    <item>")
+        parts.append("      <title>" + escape(it["title"]) + "</title>")
+        parts.append("      <link>" + escape(link_for_rss) + "</link>")
+        parts.append('      <guid isPermaLink="false">' + escape(it["guid"] or it["link"]) + "</guid>")
+        parts.append("      <pubDate>" + str(pub) + "</pubDate>")
+        parts.append("      <description><![CDATA[" + desc_with_link + "]]></description>")
+        parts.append("    </item>")
+    parts.append("  </channel>")
+    parts.append("</rss>")
+    return "\n".join(parts)
 
+# ---------- main ----------
 def main():
     if MODE == "google_sheet":
         items = fetch_google_sheet()
     else:
         items = fetch_rss()
+
     outdir = ROOT / "public"
-    outdir.mkdir(exist_ok=True, parents=True)
-    rss = build_rss(items)
-    (outdir / "feed.xml").write_text(rss, encoding="utf-8")
-    print(f"Wrote {(outdir / 'feed.xml').as_posix()} with {len(items)} items.")
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # Create summary pages + index and swap RSS links to summary pages
+    write_summary_pages(items)
+    write_index(items)
+
+    rss_xml = build_rss(items)
+    (outdir / "feed.xml").write_text(rss_xml, encoding="utf-8")
+    print(f"Wrote {(outdir / 'feed.xml').as_posix()} with {len(items)} item(s).")
 
 if __name__ == "__main__":
     main()
