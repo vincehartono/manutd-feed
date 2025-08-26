@@ -14,7 +14,7 @@ Config: settings.json
   "exclude_keywords": [],
   "max_items": 40,
   "days_lookback": 14,
-  "site_base": "https://<YOUR_USERNAME>.github.io/<REPO_NAME>"  // NO trailing slash
+  "site_base": "https://vincehartono.github.io/manutd-feed"  // NO trailing slash
 }
 """
 import csv
