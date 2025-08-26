@@ -4,16 +4,25 @@
   "description": "Live Manchester United updates (auto-aggregated).",
   "mode": "rss_aggregate",
   "rss_sources": [
-    "https://example.com/feed1.xml",
-    "https://example.com/feed2.xml"
+    "https://www.theguardian.com/football/manchester-united/rss",
+    "https://strettynews.com/feed",
+    "https://oldtraffordfaithful.com/feed",
+    "https://reddevilarmada.com/feed",
+    "https://www.unitedinfocus.com/feed",
+    "https://thepeoplesperson.com/feed",
+    "http://feeds.bbci.co.uk/sport/football/rss.xml",
+    "https://www.skysports.com/rss/11095"
   ],
   "keywords": [
     "Manchester United",
     "Man Utd",
-    "MUFC"
+    "MUFC",
+    "Old Trafford",
+    "Red Devils"
   ],
-  "exclude_keywords": [],
-  "max_items": 30,
-  "days_lookback": 14,
-  "google_sheet_csv_url": "https://docs.google.com/spreadsheets/d/.../pub?output=csv"
+  "exclude_keywords": [
+    "United States"
+  ],
+  "max_items": 40,
+  "days_lookback": 14
 }
