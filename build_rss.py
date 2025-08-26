@@ -182,20 +182,31 @@ def render_summary_html(title: str, original_url: str, desc: str, pub_dt: dateti
 </html>"""
 
 def write_summary_pages(items: List[Dict]) -> None:
-    if not SITE_BASE:
-        # We still generate pages; link building below will fallback to original link if site_base missing.
-        pass
     posts_dir = ROOT / "public" / "posts"
     posts_dir.mkdir(parents=True, exist_ok=True)
+    article_base = SETTINGS.get("article_page_base", "").rstrip("/")
     for it in items:
         slug = slugify(it["title"] or it["guid"])
+        it["slug"] = slug
+
+        # Build the GitHub summary page (still generated so you keep an archive)
         html = render_summary_html(it["title"], it["link"], it["desc"], it["pubDate"])
+
+        # If you want GH pages to auto-forward old links to GoDaddy, add a redirect:
+        if article_base:
+            godaddy_url = f"{article_base}?slug={slug}"
+            redirect = f'<meta http-equiv="refresh" content="0; url={godaddy_url}">'
+            html = html.replace("<title>", redirect + "<title>", 1)
+
         (posts_dir / f"{slug}.html").write_text(html, encoding="utf-8")
-        # attach summary URL for RSS
-        if SITE_BASE:
+
+        # Tell the RSS to use your GoDaddy page if configured, else GitHub pages
+        if article_base:
+            it["summary_url"] = f"{article_base}?slug={slug}"
+        elif SITE_BASE:
             it["summary_url"] = f"{SITE_BASE}/posts/{slug}.html"
         else:
-            it["summary_url"] = it["link"]  # fallback if site_base not set
+            it["summary_url"] = it["link"]
 
 def write_index(items: List[Dict]) -> None:
     # simple landing page with links to summaries
@@ -291,12 +302,15 @@ def main():
     outdir = ROOT / "public"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Create summary pages + index and swap RSS links to summary pages
+    # 1) Enrich summaries (loop)
     for it in items:
-    it["desc"] = enrich_summary(it["link"], it["desc"])
+        it["desc"] = enrich_summary(it["link"], it["desc"])
+
+    # 2) Build pages once (not inside the loop)
     write_summary_pages(items)
     write_index(items)
 
+    # 3) Write feed
     rss_xml = build_rss(items)
     (outdir / "feed.xml").write_text(rss_xml, encoding="utf-8")
     print(f"Wrote {(outdir / 'feed.xml').as_posix()} with {len(items)} item(s).")
