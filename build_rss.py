@@ -147,9 +147,13 @@ def find_page_image(original_url: str) -> Optional[str]:
     return None
 
 THUMBS_DIR = ROOT / "public" / "thumbs"
-def make_square_thumb(image_url: str, slug: str, size: int = 600) -> Optional[str]:
+
+def make_wide_thumb_cover(image_url: str, slug: str,
+                          size=(960, 540),   # 16:9
+                          focus_y=0.35       # slight top bias (faces)
+                          ) -> Optional[str]:
     """
-    Download image_url, letterbox-fit into a square JPEG (size x size) on a black background.
+    Download image_url and create a 16:9 cover-cropped JPEG (fills GoDaddy list slots cleanly).
     Returns the public URL to the thumb, or None on failure.
     """
     try:
@@ -158,15 +162,24 @@ def make_square_thumb(image_url: str, slug: str, size: int = 600) -> Optional[st
         r.raise_for_status()
         im = Image.open(BytesIO(r.content)).convert("RGB")
 
-        # contain-fit into a square canvas (no cropping of faces)
-        canvas = Image.new("RGB", (size, size), (0, 0, 0))  # matches dark theme
-        im.thumbnail((size, size), Image.LANCZOS)           # preserve aspect
-        x = (size - im.width) // 2
-        y = (size - im.height) // 2
-        canvas.paste(im, (x, y))
+        W, H = size
+        iw, ih = im.size
+        # scale to COVER the target
+        s = max(W / iw, H / ih)
+        nw, nh = int(iw * s), int(ih * s)
+        im = im.resize((nw, nh), Image.LANCZOS)
+
+        # crop with slight top bias
+        left = max(0, (nw - W) // 2)
+        top = int((nh - H) * focus_y)
+        if top < 0: top = 0
+        if top + H > nh: top = nh - H
+        if left + W > nw: left = nw - W
+
+        im = im.crop((left, top, left + W, top + H))
 
         out_path = THUMBS_DIR / f"{slug}.jpg"
-        canvas.save(out_path, "JPEG", quality=85, optimize=True)
+        im.save(out_path, "JPEG", quality=85, optimize=True)
         return f"{SITE_BASE}/thumbs/{slug}.jpg" if SITE_BASE else None
     except Exception:
         return None
@@ -279,7 +292,7 @@ def render_summary_html(title: str, original_url: str, desc: str, pub_dt: dateti
 </main>
 <script>
 (function () {{
-  // Notify parent (GoDaddy page) so it can show an "Open original" button if it wants
+  // Notify parent (GoDaddy page) so it can open the original at top level if needed
   var link = document.querySelector('a.btn[data-read-original]');
   if (link) {{
     try {{ window.parent.postMessage({{ kind: 'summary-ready', original: link.href }}, '*'); }} catch(e){{}}
@@ -304,7 +317,7 @@ def write_summary_pages(items: List[Dict]) -> None:
         slug = slugify(it["title"] or it["guid"])
         it["slug"] = slug
 
-        # Build the GitHub summary page (kept for direct visits)
+        # GitHub summary page (kept for direct visits)
         html = render_summary_html(it["title"], it["link"], it["desc"], it["pubDate"], it.get("image"))
         (posts_dir / f"{slug}.html").write_text(html, encoding="utf-8")
 
@@ -365,7 +378,7 @@ def build_rss(items: List[Dict]) -> str:
         parts.append("      <link>" + escape(link_for_rss) + "</link>")
         parts.append('      <guid isPermaLink="true">' + escape(link_for_rss) + "</guid>")
         parts.append("      <pubDate>" + str(pub) + "</pubDate>")
-        # Prefer square thumb for list templates; fall back to full image
+        # Prefer 16:9 thumb for list templates; fall back to full image
         if it.get("thumb"):
             parts.append('      <media:thumbnail url="' + escape(it["thumb"]) + '" />')
             parts.append('      <enclosure url="' + escape(it["thumb"]) + '" type="image/jpeg" />')
@@ -420,16 +433,15 @@ def main():
     outdir = ROOT / "public"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Enrich summaries, find images, and make square thumbs
+    # Enrich summaries, find images, and make 16:9 thumbs
     for it in items:
         it["desc"] = enrich_summary(it["link"], it["desc"])
         if not it.get("image"):
             it["image"] = find_page_image(it["link"])
-        # Create square thumb to avoid hard cropping in GoDaddy list
         it["thumb"] = None
         if it.get("image"):
             slug = slugify(it["title"] or it["guid"])
-            it["thumb"] = make_square_thumb(it["image"], slug)
+            it["thumb"] = make_wide_thumb_cover(it["image"], slug)
 
     # Build pages + index + feed
     write_summary_pages(items)
