@@ -7,7 +7,7 @@ settings.json example:
   "title": "United Pulse",
   "link": "https://manchesterunitednews.godaddysites.com/",
   "description": "Live Manchester United updates (auto-aggregated).",
-  "mode": "rss_aggregate",            // or "google_sheet"
+  "mode": "rss_aggregate",                    // or "google_sheet"
   "rss_sources": ["https://.../feed", "..."],
   "google_sheet_csv_url": "https://docs.google.com/.../pub?output=csv",
   "keywords": ["Manchester United", "Man Utd", "MUFC"],
@@ -18,10 +18,8 @@ settings.json example:
   "article_page_base": "https://manchesterunitednews.godaddysites.com/article"
 }
 
-Dependencies (requirements.txt / GitHub Actions):
-  feedparser
-  requests
-  beautifulsoup4
+Dependencies (install in your workflow):
+  feedparser requests beautifulsoup4 pillow
 """
 import csv
 import io
@@ -36,6 +34,8 @@ from xml.sax.saxutils import escape
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+from io import BytesIO
+from PIL import Image
 
 # ---------- load settings ----------
 ROOT = pathlib.Path(__file__).parent
@@ -85,7 +85,6 @@ def slugify(s: str) -> str:
     return s[:80] or "post"
 
 def dedupe_and_sort(items: List[Dict]) -> List[Dict]:
-    # newest first, dedupe by guid (or link)
     seen = set()
     out = []
     for it in sorted(items, key=lambda x: x["pubDate"], reverse=True):
@@ -146,6 +145,31 @@ def find_page_image(original_url: str) -> Optional[str]:
     except Exception:
         pass
     return None
+
+THUMBS_DIR = ROOT / "public" / "thumbs"
+def make_square_thumb(image_url: str, slug: str, size: int = 600) -> Optional[str]:
+    """
+    Download image_url, letterbox-fit into a square JPEG (size x size) on a black background.
+    Returns the public URL to the thumb, or None on failure.
+    """
+    try:
+        THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+        r = requests.get(image_url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        im = Image.open(BytesIO(r.content)).convert("RGB")
+
+        # contain-fit into a square canvas (no cropping of faces)
+        canvas = Image.new("RGB", (size, size), (0, 0, 0))  # matches dark theme
+        im.thumbnail((size, size), Image.LANCZOS)           # preserve aspect
+        x = (size - im.width) // 2
+        y = (size - im.height) // 2
+        canvas.paste(im, (x, y))
+
+        out_path = THUMBS_DIR / f"{slug}.jpg"
+        canvas.save(out_path, "JPEG", quality=85, optimize=True)
+        return f"{SITE_BASE}/thumbs/{slug}.jpg" if SITE_BASE else None
+    except Exception:
+        return None
 
 # ---------- fetchers ----------
 def fetch_rss() -> List[Dict]:
@@ -255,24 +279,15 @@ def render_summary_html(title: str, original_url: str, desc: str, pub_dt: dateti
 </main>
 <script>
 (function () {{
-  var original = {json.dumps("") or '""'};
-  try {{ original = {json.dumps("")}; }} catch(e){{}}
-  // Tell the parent (GoDaddy page) the original URL as soon as we load
-  try {{
-    window.parent.postMessage({{ kind: 'summary-ready', original: {json.dumps("")} }}, '*');
-  }} catch (e) {{}}
+  // Notify parent (GoDaddy page) so it can show an "Open original" button if it wants
   var link = document.querySelector('a.btn[data-read-original]');
   if (link) {{
-    // Store once
-    var orig = link.getAttribute('href');
-    try {{
-      window.parent.postMessage({{ kind: 'summary-ready', original: orig }}, '*');
-    }} catch (e) {{}}
+    try {{ window.parent.postMessage({{ kind: 'summary-ready', original: link.href }}, '*'); }} catch(e){{}}
     link.addEventListener('click', function (e) {{
       try {{
         if (window.top !== window.self) {{
           e.preventDefault();
-          window.parent.postMessage({{ kind: 'open-original', original: orig }}, '*');
+          window.parent.postMessage({{ kind: 'open-original', original: link.href }}, '*');
         }}
       }} catch (err) {{}}
     }});
@@ -293,14 +308,15 @@ def write_summary_pages(items: List[Dict]) -> None:
         html = render_summary_html(it["title"], it["link"], it["desc"], it["pubDate"], it.get("image"))
         (posts_dir / f"{slug}.html").write_text(html, encoding="utf-8")
 
-        # JSON payload (GoDaddy will fetch this and render natively)
+        # JSON payload (GoDaddy renders this natively)
         data = {
             "title": it["title"],
             "original_url": it["link"],
             "desc": it["desc"],
             "pubDate": to_rfc822(it["pubDate"]),
             "slug": slug,
-            "image": it.get("image")
+            "image": it.get("image"),
+            "thumb": it.get("thumb")
         }
         (posts_dir / f"{slug}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -313,7 +329,6 @@ def write_summary_pages(items: List[Dict]) -> None:
             it["summary_url"] = it["link"]
 
 def write_index(items: List[Dict]) -> None:
-    # simple landing page with links to summaries
     lines = [
         "<!doctype html><meta charset='utf-8'><title>{}</title>".format(escape(TITLE)),
         "<style>body{font:16px/1.6 system-ui;margin:2rem} a{color:#cc0000;text-decoration:none} a:hover{text-decoration:underline}</style>",
@@ -332,7 +347,7 @@ def build_rss(items: List[Dict]) -> str:
     now_rfc = to_rfc822(datetime.now(timezone.utc))
     parts = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
-    parts.append('<rss version="2.0">')
+    parts.append('<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">')
     parts.append('  <channel>')
     parts.append('    <title>' + escape(TITLE) + '</title>')
     parts.append('    <link>' + escape(LINK) + '</link>')
@@ -350,8 +365,11 @@ def build_rss(items: List[Dict]) -> str:
         parts.append("      <link>" + escape(link_for_rss) + "</link>")
         parts.append('      <guid isPermaLink="true">' + escape(link_for_rss) + "</guid>")
         parts.append("      <pubDate>" + str(pub) + "</pubDate>")
-        # Optional: image enclosure for some readers
-        if it.get("image"):
+        # Prefer square thumb for list templates; fall back to full image
+        if it.get("thumb"):
+            parts.append('      <media:thumbnail url="' + escape(it["thumb"]) + '" />')
+            parts.append('      <enclosure url="' + escape(it["thumb"]) + '" type="image/jpeg" />')
+        elif it.get("image"):
             parts.append('      <enclosure url="' + escape(it["image"]) + '" type="image/jpeg" />')
         parts.append("      <description><![CDATA[" + desc_with_link + "]]></description>")
         parts.append("    </item>")
@@ -402,11 +420,16 @@ def main():
     outdir = ROOT / "public"
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Enrich summaries and fill missing images
+    # Enrich summaries, find images, and make square thumbs
     for it in items:
         it["desc"] = enrich_summary(it["link"], it["desc"])
         if not it.get("image"):
             it["image"] = find_page_image(it["link"])
+        # Create square thumb to avoid hard cropping in GoDaddy list
+        it["thumb"] = None
+        if it.get("image"):
+            slug = slugify(it["title"] or it["guid"])
+            it["thumb"] = make_square_thumb(it["image"], slug)
 
     # Build pages + index + feed
     write_summary_pages(items)
