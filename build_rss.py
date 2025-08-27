@@ -224,21 +224,27 @@ def write_summary_pages(items: List[Dict]) -> None:
         slug = slugify(it["title"] or it["guid"])
         it["slug"] = slug
 
-        # Build the GitHub summary page (no redirect)
+        # Build the GitHub summary page (kept for direct visits)
         html = render_summary_html(it["title"], it["link"], it["desc"], it["pubDate"])
         (posts_dir / f"{slug}.html").write_text(html, encoding="utf-8")
 
-        # Tell the RSS to use your GoDaddy page if configured, else GitHub pages
+        # NEW: JSON payload (GoDaddy will fetch this and render natively)
+        data = {
+            "title": it["title"],
+            "original_url": it["link"],
+            "desc": it["desc"],
+            "pubDate": to_rfc822(it["pubDate"]),
+            "slug": slug
+        }
+        (posts_dir / f"{slug}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # RSS should link to your GoDaddy page (no iframe needed there)
         if article_base:
-          orig = it["link"]
-          encoded = quote(orig, safe="")
-          # Pass both the slug and the original URL in the hash
-          it["summary_url"] = f"{article_base}#slug={slug}&u={encoded}"
+            it["summary_url"] = f"{article_base}#slug={slug}"
         elif SITE_BASE:
             it["summary_url"] = f"{SITE_BASE}/posts/{slug}.html"
         else:
             it["summary_url"] = it["link"]
-
 
 def write_index(items: List[Dict]) -> None:
     # simple landing page with links to summaries
