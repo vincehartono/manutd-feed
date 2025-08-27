@@ -360,32 +360,50 @@ def build_rss(items: List[Dict]) -> str:
     now_rfc = to_rfc822(datetime.now(timezone.utc))
     parts = []
     parts.append('<?xml version="1.0" encoding="UTF-8"?>')
-    parts.append('<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">')
+    parts.append('<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:content="http://purl.org/rss/1.0/modules/content/">')
     parts.append('  <channel>')
     parts.append('    <title>' + escape(TITLE) + '</title>')
     parts.append('    <link>' + escape(LINK) + '</link>')
     parts.append('    <description>' + escape(DESC) + '</description>')
     parts.append('    <lastBuildDate>' + now_rfc + '</lastBuildDate>')
+
     for it in items:
         link_for_rss = it.get("summary_url") or it["link"]
         pub = it["pubDate"]
         if isinstance(pub, datetime):
             pub = to_rfc822(pub)
-        desc_with_link = f"""{it['desc']}<br/><br/>
+
+        # choose image (prefer our 16:9 thumb)
+        img = it.get("thumb") or it.get("image")
+        # HTML body for readers that render item content
+        img_tag = f'<p><img src="{escape(img)}" alt="" width="960" height="540" style="max-width:100%;height:auto;border-radius:6px;margin:0 0 8px"/></p>' if img else ""
+        body_html = (
+            img_tag +
+            f"<p>{escape(it['desc'])}</p>" +
+            f'<p><a href="{escape(it["link"])}" rel="noopener nofollow">Read original →</a></p>'
+        )
+
+        # short description (text + link). Keep it simple.
+        desc_html = f"""{escape(it['desc'])}<br/><br/>
 <a href="{escape(it['link'])}" rel="noopener nofollow">Read original →</a>"""
+
         parts.append("    <item>")
         parts.append("      <title>" + escape(it["title"]) + "</title>")
         parts.append("      <link>" + escape(link_for_rss) + "</link>")
         parts.append('      <guid isPermaLink="true">' + escape(link_for_rss) + "</guid>")
         parts.append("      <pubDate>" + str(pub) + "</pubDate>")
-        # Prefer 16:9 thumb for list templates; fall back to full image
-        if it.get("thumb"):
-            parts.append('      <media:thumbnail url="' + escape(it["thumb"]) + '" />')
-            parts.append('      <enclosure url="' + escape(it["thumb"]) + '" type="image/jpeg" />')
-        elif it.get("image"):
-            parts.append('      <enclosure url="' + escape(it["image"]) + '" type="image/jpeg" />')
-        parts.append("      <description><![CDATA[" + desc_with_link + "]]></description>")
+
+        # Give multiple hints for the image
+        if img:
+            parts.append('      <media:content url="' + escape(img) + '" medium="image" width="960" height="540" />')
+            parts.append('      <media:thumbnail url="' + escape(img) + '" width="960" height="540" />')
+            # enclosure is still helpful for some readers
+            parts.append('      <enclosure url="' + escape(img) + '" type="image/jpeg" />')
+
+        parts.append("      <description><![CDATA[" + desc_html + "]]></description>")
+        parts.append("      <content:encoded><![CDATA[" + body_html + "]]></content:encoded>")
         parts.append("    </item>")
+
     parts.append("  </channel>")
     parts.append("</rss>")
     return "\n".join(parts)
